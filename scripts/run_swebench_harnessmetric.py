@@ -84,7 +84,9 @@ def _plain(
     effort: str,
     timeout: int,
 ) -> tuple[dict[str, Any], bool]:
-    digest = hashlib.sha256(f"plain:{instance['instance_id']}:{model}".encode()).hexdigest()[:16]
+    digest = hashlib.sha256(
+        f"plain:{instance['instance_id']}:{model}:{root.resolve()}".encode()
+    ).hexdigest()[:16]
     result = run_codebuddy(
         workspace=workspace,
         prompt=prompt,

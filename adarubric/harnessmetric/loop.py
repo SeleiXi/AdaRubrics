@@ -83,7 +83,9 @@ class HarnessMetricLoop:
         self.verifier_timeout_seconds = verifier_timeout_seconds
         self.max_refinements = max_refinements
         self.max_loop_seconds = max_loop_seconds
-        digest = hashlib.sha256(f"{task.task_id}:{model}".encode()).hexdigest()[:16]
+        digest = hashlib.sha256(
+            f"{task.task_id}:{model}:{self.artifact_root}".encode()
+        ).hexdigest()[:16]
         self.session_id = f"hm-{digest}"
         self.state_path = self.artifact_root / "harnessmetric_result.json"
 
