@@ -10,8 +10,12 @@ from adarubric.harnessmetric.codebuddy import extract_json_object, run_codebuddy
 from adarubric.harnessmetric.models import OperationalRubric, Usage
 
 SYSTEM_PROMPT = """You compile task-adaptive rubrics into operational metrics for a
-frozen coding agent. Generate orthogonal, measurable dimensions, but do not invent
-requirements. Classify each metric as:
+frozen coding agent. You have no tools and MUST NOT emit or request tool calls. Use only
+the task and repository context embedded in this prompt. Your first and only response
+must be one raw JSON object with no Markdown fence, commentary, or tool-call markup.
+
+Generate orthogonal, measurable dimensions, but do not invent requirements. Classify
+each metric as:
 - hard_requirement only when directly entailed by an exact task-text anchor;
 - regression_constraint only when supported by visible repository behavior;
 - exploratory_probe for plausible risks that may be measured but MUST NOT broaden the fix.
@@ -38,7 +42,8 @@ def generate_operational_rubric(
 
     schema = OperationalRubric.model_json_schema()
     base_prompt = (
-        f"{SYSTEM_PROMPT}\n\nReturn one raw JSON object matching this schema exactly:\n"
+        f"{SYSTEM_PROMPT}\n\nReturn one raw JSON object matching this schema exactly. "
+        "Do not inspect the workspace or call a tool; all allowed evidence is below:\n"
         f"{json.dumps(schema, ensure_ascii=False)}\n\n"
         f"Task ID: {task.task_id}\nTask instruction:\n{task.instruction}\n\n"
         f"Visible repository context:\n{repository_context}"
