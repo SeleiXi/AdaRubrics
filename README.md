@@ -187,6 +187,15 @@ adarubric/
 pytest tests/ -v
 ```
 
+## HarnessMetric: online agent evolution
+
+The `HarnessMetric` branch adds a verifier-backed online loop for frozen coding agents.
+Unlike AdaRubric's post-hoc trajectory scoring, it compiles task-adaptive dimensions
+into task-anchored measurements, identifies the current unmet bottleneck, resumes the
+same CodeBuddy session, and re-measures before stopping. See
+[docs/HARNESSMETRIC.md](docs/HARNESSMETRIC.md) for the four-arm SWE-bench Verified
+evaluation and checkpoint/monitoring protocol.
+
 ---
 
 ## Related Projects
