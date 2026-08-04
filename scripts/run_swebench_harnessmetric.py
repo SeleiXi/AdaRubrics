@@ -34,12 +34,19 @@ the fix. Hidden tests, gold patches, and grading metadata are unavailable and mu
 be sought. Preserve public API compatibility beyond the requested change. Use the
 supplied .harnessmetric/run_tests.py wrapper and Python executable for Linux test
 commands; do not inspect Docker image internals or files outside this repository. The
-original issue is authoritative.
+original issue is authoritative. Do not delete, move, rewrite, or otherwise modify
+.git metadata; the harness needs the original Git index to extract your patch.
 """
 
 HERE = Path(__file__).resolve().parent
 TEST_HELPER = HERE / "run_tests_in_swebench.py"
 WINDOWS_EVAL = HERE / "swebench_windows_eval.py"
+ARM_DIRECTORIES = {
+    "plain_deepseek_v4_flash": "pf",
+    "plain_hy3": "ph",
+    "harnessmetric_deepseek_v4_flash": "mf",
+    "harnessmetric_hy3": "mh",
+}
 
 
 def arm_name(treatment: str, model: str) -> str:
@@ -171,7 +178,11 @@ def _harnessmetric(
 def run_instance(
     instance: dict[str, Any], args: argparse.Namespace, arm: str, ledger: RunLedger
 ) -> dict[str, Any]:
-    root = args.run_root / arm / "instances" / instance["instance_id"]
+    short_root = args.run_root / ARM_DIRECTORIES[arm] / "i" / instance["instance_id"]
+    legacy_root = args.run_root / arm / "instances" / instance["instance_id"]
+    # Resume checkpoints written before the Windows path-shortening layout was
+    # introduced. New instances always use the shorter path.
+    root = legacy_root if legacy_root.exists() else short_root
     root.mkdir(parents=True, exist_ok=True)
     result_path = root / "result.json"
     if result_path.is_file():
@@ -314,7 +325,7 @@ def main() -> None:
         initial_metric_policy=args.initial_metric_policy,
     )
     ledger.mark_arm(arm, status="running")
-    failures_path = args.run_root / arm / "infrastructure_failures.json"
+    failures_path = args.run_root / ARM_DIRECTORIES[arm] / "infrastructure_failures.json"
     failures_path.parent.mkdir(parents=True, exist_ok=True)
     failures: list[dict[str, Any]] = []
     try:
@@ -331,7 +342,11 @@ def main() -> None:
                 except Exception as exc:  # keep the 100-task queue resumable
                     last_error = exc
                     error_root = (
-                        args.run_root / arm / "instances" / instance["instance_id"] / "errors"
+                        args.run_root
+                        / ARM_DIRECTORIES[arm]
+                        / "i"
+                        / instance["instance_id"]
+                        / "errors"
                     )
                     error_root.mkdir(parents=True, exist_ok=True)
                     (error_root / f"attempt_{attempt}.log").write_text(

@@ -147,16 +147,36 @@ class HarnessMetricLoop:
         )
 
     def _verification_workspace(self, index: int) -> Path:
-        root = self.artifact_root / "verifier" / f"{index:02d}" / "workspace"
+        if not (self.workspace / ".git" / "index").is_file():
+            restored = _run(["git", "reset", "--mixed", "HEAD"], self.workspace)
+            if restored.returncode != 0:
+                raise RuntimeError(f"could not restore missing Git index: {restored.stderr}")
+        # Keep the checkout path short: several SWE-bench repositories contain
+        # tracked paths close to Windows' legacy MAX_PATH limit. Verifier logs
+        # remain under ``verifier/`` while this disposable checkout uses ``v/``.
+        root = self.artifact_root / "v" / f"{index:02d}" / "w"
         if root.exists():
             shutil.rmtree(root)
         root.parent.mkdir(parents=True, exist_ok=True)
         cloned = _run(
-            ["git", "clone", "--shared", str(self.workspace), str(root)],
+            [
+                "git",
+                "-c",
+                "core.longpaths=true",
+                "clone",
+                "--shared",
+                str(self.workspace),
+                str(root),
+            ],
             self.artifact_root,
         )
         if cloned.returncode != 0:
             raise RuntimeError(f"could not clone verifier workspace: {cloned.stderr}")
+        configured = _run(["git", "config", "core.longpaths", "true"], root)
+        if configured.returncode != 0:
+            raise RuntimeError(
+                f"could not enable long paths in verifier workspace: {configured.stderr}"
+            )
         patch = _run(["git", "diff", "--binary", "HEAD", "--", "."], self.workspace)
         if patch.returncode != 0:
             raise RuntimeError(f"could not capture executor patch: {patch.stderr}")

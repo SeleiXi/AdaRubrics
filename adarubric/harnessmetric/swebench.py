@@ -95,7 +95,11 @@ def prepare_pristine(instance: dict[str, Any], root: Path, image: str) -> Path:
             raise RuntimeError(f"could not stream official image: {stderr}")
     finally:
         docker("rm", "-f", container, cwd=root, required=False)
-    for key, value in (("core.symlinks", "false"), ("core.filemode", "false")):
+    for key, value in (
+        ("core.symlinks", "false"),
+        ("core.filemode", "false"),
+        ("core.longpaths", "true"),
+    ):
         configured = run(["git", "config", key, value], cwd=pristine)
         if configured.returncode != 0:
             raise RuntimeError(configured.stderr)
@@ -119,7 +123,15 @@ def prepare_workspace(
         return workspace
     root.mkdir(parents=True, exist_ok=True)
     cloned = run(
-        ["git", "clone", "--shared", str(pristine.resolve()), str(workspace.resolve())],
+        [
+            "git",
+            "-c",
+            "core.longpaths=true",
+            "clone",
+            "--shared",
+            str(pristine.resolve()),
+            str(workspace.resolve()),
+        ],
         cwd=root,
     )
     if cloned.returncode != 0:
@@ -127,6 +139,9 @@ def prepare_workspace(
     checked = run(["git", "checkout", "--detach", base_commit], cwd=workspace)
     if checked.returncode != 0:
         raise RuntimeError(checked.stderr)
+    configured = run(["git", "config", "core.longpaths", "true"], cwd=workspace)
+    if configured.returncode != 0:
+        raise RuntimeError(configured.stderr)
     helper = workspace / ".harnessmetric"
     helper.mkdir()
     shutil.copy2(helper_script, helper / "run_tests.py")
@@ -164,6 +179,10 @@ def repository_context(workspace: Path, instruction: str, limit: int = 40000) ->
 
 
 def model_patch(workspace: Path, base_commit: str) -> str:
+    if not (workspace / ".git" / "index").is_file():
+        restored = run(["git", "reset", "--mixed", base_commit], cwd=workspace)
+        if restored.returncode != 0:
+            raise RuntimeError(f"could not restore missing Git index: {restored.stderr}")
     untracked = run(
         ["git", "ls-files", "--others", "--exclude-standard"], cwd=workspace
     ).stdout.splitlines()

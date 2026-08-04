@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $parentRoot = (Resolve-Path (Join-Path $repoRoot "..")).Path
-if (-not $RunRoot) { $RunRoot = Join-Path $repoRoot "runs\swebench-verified-100" }
+if (-not $RunRoot) { $RunRoot = Join-Path $parentRoot "runs\hm100" }
 if (-not $Manifest) { $Manifest = Join-Path $parentRoot "runs\swebench-100\manifest.json" }
 if (-not $RowsDir) { $RowsDir = Join-Path $parentRoot "tmp\swebench" }
 if (-not $HarnessPython) {
