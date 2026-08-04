@@ -52,11 +52,11 @@ foreach ($job in $jobs) {
         "--effort", "medium",
         "--initial-metric-policy", "off",
         "--agent-timeout", "7200",
-        "--generator-timeout", "1800",
-        "--verifier-timeout", "1800",
-        "--grade-timeout", "1800",
+        "--generator-timeout", "7200",
+        "--verifier-timeout", "7200",
+        "--grade-timeout", "7200",
         "--max-refinements", "12",
-        "--max-loop-hours", "12",
+        "--max-loop-hours", "48",
         "--infrastructure-retries", "3"
         "--quota-retry-seconds", "300",
         "--quota-max-wait-hours", "168"

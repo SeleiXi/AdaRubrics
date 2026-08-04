@@ -313,7 +313,7 @@ def run_instance(
 
     if not args.keep_workspaces:
         cleanup_errors: dict[str, str] = {}
-        for path in (workspace, pristine):
+        for path in (workspace, pristine, root / "v"):
             if path.exists() and root.resolve() in path.resolve().parents:
                 error = _best_effort_remove(path)
                 if error is not None:
@@ -338,11 +338,11 @@ def main() -> None:
     parser.add_argument("--effort", default="medium")
     parser.add_argument("--initial-metric-policy", choices=("off", "hard", "all"), default="off")
     parser.add_argument("--agent-timeout", type=int, default=7200)
-    parser.add_argument("--generator-timeout", type=int, default=1800)
-    parser.add_argument("--verifier-timeout", type=int, default=1800)
-    parser.add_argument("--grade-timeout", type=int, default=1800)
+    parser.add_argument("--generator-timeout", type=int, default=7200)
+    parser.add_argument("--verifier-timeout", type=int, default=7200)
+    parser.add_argument("--grade-timeout", type=int, default=7200)
     parser.add_argument("--max-refinements", type=int, default=12)
-    parser.add_argument("--max-loop-hours", type=int, default=12)
+    parser.add_argument("--max-loop-hours", type=int, default=48)
     parser.add_argument("--infrastructure-retries", type=int, default=3)
     parser.add_argument("--quota-retry-seconds", type=int, default=300)
     parser.add_argument("--quota-max-wait-hours", type=float, default=168.0)

@@ -61,6 +61,9 @@ def prepare_pristine(instance: dict[str, Any], root: Path, image: str) -> Path:
         "harnessmetric-copy-"
         + hashlib.sha256(f"{instance['instance_id']}:{root}".encode()).hexdigest()[:12]
     )
+    # A killed extraction can leave this deterministic, harness-owned container
+    # behind. Removing only this exact name makes infrastructure retries resumable.
+    docker("rm", "-f", container, cwd=root, required=False)
     docker("create", "--name", container, image, "tail", "-f", "/dev/null", cwd=root)
     docker("start", container, cwd=root)
     try:

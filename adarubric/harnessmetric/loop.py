@@ -63,8 +63,8 @@ class HarnessMetricLoop:
         effort: str = "medium",
         initial_metric_policy: str = "off",
         agent_timeout_seconds: int = 7200,
-        generator_timeout_seconds: int = 1800,
-        verifier_timeout_seconds: int = 1800,
+        generator_timeout_seconds: int = 7200,
+        verifier_timeout_seconds: int = 7200,
         max_refinements: int = 12,
         max_loop_seconds: int = 43200,
     ) -> None:
@@ -154,10 +154,23 @@ class HarnessMetricLoop:
         # Keep the checkout path short: several SWE-bench repositories contain
         # tracked paths close to Windows' legacy MAX_PATH limit. Verifier logs
         # remain under ``verifier/`` while this disposable checkout uses ``v/``.
-        root = self.artifact_root / "v" / f"{index:02d}" / "w"
-        if root.exists():
-            shutil.rmtree(root)
-        root.parent.mkdir(parents=True, exist_ok=True)
+        checkout_root = self.artifact_root / "v" / f"{index:02d}"
+        checkout_root.mkdir(parents=True, exist_ok=True)
+        root: Path | None = None
+        for slot in range(32):
+            candidate = checkout_root / ("w" if slot == 0 else f"x{slot:02d}")
+            if candidate.exists():
+                try:
+                    shutil.rmtree(candidate)
+                except OSError:
+                    # A timed-out CodeBuddy child or virus scanner can retain a
+                    # Windows handle briefly. Use a fresh isolated checkout
+                    # instead of turning a verifier timeout into task failure.
+                    continue
+            root = candidate
+            break
+        if root is None:
+            raise RuntimeError("all verifier checkout slots are still locked")
         cloned = _run(
             [
                 "git",
