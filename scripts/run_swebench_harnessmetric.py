@@ -6,9 +6,11 @@ import argparse
 import hashlib
 import json
 import shutil
+import stat
 import sys
 import time
 import traceback
+from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
@@ -49,6 +51,25 @@ ARM_DIRECTORIES = {
     "harnessmetric_hy3": "mh",
 }
 QUOTA_ERROR = "codebuddy_quota_exhausted"
+
+
+def _best_effort_remove(path: Path, attempts: int = 5) -> str | None:
+    """Remove a disposable workspace without changing an already-scored result."""
+
+    last_error: OSError | None = None
+    for attempt in range(1, attempts + 1):
+        if not path.exists():
+            return None
+        for candidate in (path, *path.rglob("*")):
+            with suppress(OSError):
+                candidate.chmod(stat.S_IWRITE)
+        try:
+            shutil.rmtree(path)
+            return None
+        except OSError as exc:
+            last_error = exc
+            time.sleep(attempt)
+    return repr(last_error)
 
 
 def arm_name(treatment: str, model: str) -> str:
@@ -284,12 +305,23 @@ def run_instance(
     result_path.write_text(
         json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
     )
+    # A recoverable provider/grader outage stays local until retry policy is
+    # exhausted. It must not enter task success/failure denominators.
+    if status == "infrastructure_failure":
+        return record
     ledger.record_task(arm=arm, task=instance, arm_result=record)
 
     if not args.keep_workspaces:
+        cleanup_errors: dict[str, str] = {}
         for path in (workspace, pristine):
             if path.exists() and root.resolve() in path.resolve().parents:
-                shutil.rmtree(path)
+                error = _best_effort_remove(path)
+                if error is not None:
+                    cleanup_errors[str(path)] = error
+        if cleanup_errors:
+            (root / "cleanup_warnings.json").write_text(
+                json.dumps(cleanup_errors, indent=2) + "\n", encoding="utf-8"
+            )
     docker("image", "rm", image, cwd=root, timeout=600, required=False)
     return record
 
