@@ -22,6 +22,14 @@ class CodeBuddyResult:
     model: str | None
     final_message: str
     termination_reason: str | None = None
+    infrastructure_error: str | None = None
+
+
+def _infrastructure_error(stderr: str) -> str | None:
+    lowered = stderr.casefold()
+    if "429" in lowered and ("额度已用尽" in stderr or "quota" in lowered):
+        return "codebuddy_quota_exhausted"
+    return None
 
 
 def _launcher() -> list[str]:
@@ -195,4 +203,5 @@ def run_codebuddy(
         model=detected_model,
         final_message=final,
         termination_reason=termination_reason,
+        infrastructure_error=_infrastructure_error(stderr),
     )

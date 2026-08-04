@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from adarubric.harnessmetric.codebuddy import _infrastructure_error
 from adarubric.harnessmetric.ledger import RunLedger
 from adarubric.harnessmetric.loop import HarnessMetricLoop
 from adarubric.harnessmetric.models import (
@@ -107,6 +108,14 @@ def test_usage_addition() -> None:
     assert Usage(input_tokens=2, output_tokens=3) + Usage(input_tokens=5, output_tokens=7) == Usage(
         input_tokens=7, output_tokens=10
     )
+
+
+def test_codebuddy_quota_is_an_infrastructure_error() -> None:
+    assert (
+        _infrastructure_error("429 额度已用尽，请购买加量包")
+        == "codebuddy_quota_exhausted"
+    )
+    assert _infrastructure_error("ordinary model stderr") is None
 
 
 def _arm_result(resolved: bool, wall: float) -> dict[str, object]:

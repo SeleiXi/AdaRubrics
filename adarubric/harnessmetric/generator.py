@@ -70,6 +70,8 @@ def generate_operational_rubric(
             persist_session=False,
         )
         total = total + result.usage
+        if result.infrastructure_error is not None:
+            raise RuntimeError(result.infrastructure_error)
         if result.return_code != 0:
             last_error = RuntimeError(f"CodeBuddy generator exited {result.return_code}")
             continue

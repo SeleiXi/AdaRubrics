@@ -58,6 +58,8 @@ foreach ($job in $jobs) {
         "--max-refinements", "12",
         "--max-loop-hours", "12",
         "--infrastructure-retries", "3"
+        "--quota-retry-seconds", "300",
+        "--quota-max-wait-hours", "168"
     )
     $process = Start-Process -FilePath $python -ArgumentList $jobArgs `
         -WorkingDirectory $repoRoot -WindowStyle Hidden `

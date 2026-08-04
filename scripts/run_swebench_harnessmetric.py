@@ -9,6 +9,7 @@ import shutil
 import sys
 import time
 import traceback
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -47,6 +48,7 @@ ARM_DIRECTORIES = {
     "harnessmetric_deepseek_v4_flash": "mf",
     "harnessmetric_hy3": "mh",
 }
+QUOTA_ERROR = "codebuddy_quota_exhausted"
 
 
 def arm_name(treatment: str, model: str) -> str:
@@ -107,12 +109,15 @@ def _plain(
         persist_session=True,
         max_turns=None,
     )
-    infrastructure_failure = result.return_code != 0 and result.termination_reason is None
+    infrastructure_failure = result.infrastructure_error is not None or (
+        result.return_code != 0 and result.termination_reason is None
+    )
     payload = {
         "executor": {
             "return_code": result.return_code,
             "session_id": result.session_id,
             "termination_reason": result.termination_reason,
+            "infrastructure_error": result.infrastructure_error,
             "final_message": result.final_message,
         },
         "phase_usage": {"executor": result.usage.model_dump()},
@@ -190,8 +195,9 @@ def run_instance(
         if not isinstance(prior, dict):
             raise ValueError(f"result root must be an object: {result_path}")
         typed_prior = cast(dict[str, Any], prior)
-        ledger.record_task(arm=arm, task=instance, arm_result=typed_prior)
-        return typed_prior
+        if typed_prior.get("status") != "infrastructure_failure":
+            ledger.record_task(arm=arm, task=instance, arm_result=typed_prior)
+            return typed_prior
 
     started = time.perf_counter()
     image = image_name(instance["instance_id"])
@@ -239,15 +245,24 @@ def run_instance(
 
     patch = model_patch(workspace, instance["base_commit"])
     (root / "model.patch").write_text(patch, encoding="utf-8")
-    score = grade(
-        instance=instance,
-        arm=arm,
-        model=args.model,
-        patch=patch,
-        root=root,
-        harness_python=args.harness_python,
-        eval_script=WINDOWS_EVAL,
-        timeout=args.grade_timeout,
+    infrastructure_reason = payload.get("executor", {}).get("infrastructure_error")
+    score = (
+        {
+            "completed": False,
+            "resolved": False,
+            "error": infrastructure_reason or "executor infrastructure failure",
+        }
+        if infrastructure_failure
+        else grade(
+            instance=instance,
+            arm=arm,
+            model=args.model,
+            patch=patch,
+            root=root,
+            harness_python=args.harness_python,
+            eval_script=WINDOWS_EVAL,
+            timeout=args.grade_timeout,
+        )
     )
     end_to_end = time.perf_counter() - started
     status = (
@@ -261,7 +276,7 @@ def run_instance(
         "status": status,
         "resolved": bool(score.get("resolved")),
         "empty_patch": not bool(patch.strip()),
-        "failure_reason": _failure_reason(score),
+        "failure_reason": infrastructure_reason or _failure_reason(score),
         "usage": _usage_dict(total_usage, end_to_end_wall=end_to_end),
         "official_score": score,
         **payload,
@@ -297,6 +312,8 @@ def main() -> None:
     parser.add_argument("--max-refinements", type=int, default=12)
     parser.add_argument("--max-loop-hours", type=int, default=12)
     parser.add_argument("--infrastructure-retries", type=int, default=3)
+    parser.add_argument("--quota-retry-seconds", type=int, default=300)
+    parser.add_argument("--quota-max-wait-hours", type=float, default=168.0)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--instance-id", action="append")
     parser.add_argument("--keep-workspaces", action="store_true")
@@ -331,29 +348,61 @@ def main() -> None:
     try:
         for instance in instances:
             ledger.mark_arm(arm, status="running", current_task=instance["instance_id"])
-            last_error: Exception | None = None
-            for attempt in range(1, args.infrastructure_retries + 1):
-                try:
-                    result = run_instance(instance, args, arm, ledger)
-                    if result["status"] != "infrastructure_failure":
-                        last_error = None
+            quota_wait_started: float | None = None
+            while True:
+                last_error: Exception | None = None
+                for attempt in range(1, args.infrastructure_retries + 1):
+                    try:
+                        result = run_instance(instance, args, arm, ledger)
+                        if result["status"] != "infrastructure_failure":
+                            last_error = None
+                            break
+                        last_error = RuntimeError(
+                            result.get("failure_reason") or result["status"]
+                        )
+                    except Exception as exc:  # keep the 100-task queue resumable
+                        last_error = exc
+                        error_root = (
+                            args.run_root
+                            / ARM_DIRECTORIES[arm]
+                            / "i"
+                            / instance["instance_id"]
+                            / "errors"
+                        )
+                        error_root.mkdir(parents=True, exist_ok=True)
+                        (error_root / f"attempt_{attempt}.log").write_text(
+                            traceback.format_exc(), encoding="utf-8"
+                        )
+                    if last_error is not None and QUOTA_ERROR in str(last_error):
                         break
-                    last_error = RuntimeError(result.get("failure_reason") or result["status"])
-                except Exception as exc:  # keep the 100-task queue resumable
-                    last_error = exc
-                    error_root = (
-                        args.run_root
-                        / ARM_DIRECTORIES[arm]
-                        / "i"
-                        / instance["instance_id"]
-                        / "errors"
+                    if attempt < args.infrastructure_retries:
+                        time.sleep(min(60, 5 * attempt))
+                if last_error is None:
+                    break
+                if QUOTA_ERROR not in str(last_error):
+                    break
+                if quota_wait_started is None:
+                    quota_wait_started = time.monotonic()
+                waited_hours = (time.monotonic() - quota_wait_started) / 3600
+                if waited_hours >= args.quota_max_wait_hours:
+                    last_error = RuntimeError(
+                        f"{QUOTA_ERROR}: wait exceeded {args.quota_max_wait_hours:g}h"
                     )
-                    error_root.mkdir(parents=True, exist_ok=True)
-                    (error_root / f"attempt_{attempt}.log").write_text(
-                        traceback.format_exc(), encoding="utf-8"
-                    )
-                if attempt < args.infrastructure_retries:
-                    time.sleep(min(60, 5 * attempt))
+                    break
+                retry_at = datetime.now().astimezone() + timedelta(
+                    seconds=args.quota_retry_seconds
+                )
+                ledger.mark_arm(
+                    arm,
+                    status="waiting_quota",
+                    current_task=instance["instance_id"],
+                    status_detail=QUOTA_ERROR,
+                    retry_at=retry_at.isoformat(timespec="seconds"),
+                )
+                time.sleep(args.quota_retry_seconds)
+                ledger.mark_arm(
+                    arm, status="running", current_task=instance["instance_id"]
+                )
             if last_error is not None:
                 failure_record = {
                     "status": "infrastructure_failure",

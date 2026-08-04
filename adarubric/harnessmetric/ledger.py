@@ -34,6 +34,8 @@ def _empty_arm(total: int) -> dict[str, Any]:
         "turns": 0,
         "current_task": None,
         "pid": None,
+        "status_detail": None,
+        "retry_at": None,
     }
 
 
@@ -108,13 +110,23 @@ class RunLedger:
                 }
             )
 
-    def mark_arm(self, arm: str, *, status: str, current_task: str | None = None) -> None:
+    def mark_arm(
+        self,
+        arm: str,
+        *,
+        status: str,
+        current_task: str | None = None,
+        status_detail: str | None = None,
+        retry_at: str | None = None,
+    ) -> None:
         with self._lock():
             data = self._read()
             state = data["arms"][arm]
             state["status"] = status
             state["current_task"] = current_task
             state["pid"] = os.getpid()
+            state["status_detail"] = status_detail
+            state["retry_at"] = retry_at
             self._write(data)
 
     def record_task(

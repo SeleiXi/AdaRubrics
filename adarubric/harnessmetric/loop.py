@@ -274,6 +274,8 @@ Return one raw JSON object matching this schema:\n{json.dumps(schema, ensure_asc
                 max_turns=None,
             )
             total = total + result.usage
+            if result.infrastructure_error is not None:
+                raise RuntimeError(result.infrastructure_error)
             if result.return_code != 0:
                 last_error = RuntimeError(f"verifier exited {result.return_code}")
                 continue
@@ -362,6 +364,8 @@ Return one raw JSON object matching this schema:\n{json.dumps(schema, ensure_asc
                 index=0,
                 resume_session_id=None,
             )
+            if initial.infrastructure_error is not None:
+                raise RuntimeError(initial.infrastructure_error)
             result.executor_usage = result.executor_usage + initial.usage
             result.session_id = initial.session_id
             result.iterations.append(
@@ -405,6 +409,8 @@ Return one raw JSON object matching this schema:\n{json.dumps(schema, ensure_asc
                 index=last.index + 1,
                 resume_session_id=result.session_id,
             )
+            if resumed.infrastructure_error is not None:
+                raise RuntimeError(resumed.infrastructure_error)
             result.executor_usage = result.executor_usage + resumed.usage
             result.session_id = resumed.session_id or result.session_id
             result.iterations.append(
@@ -458,6 +464,8 @@ Return one raw JSON object matching this schema:\n{json.dumps(schema, ensure_asc
                 index=index + 1,
                 resume_session_id=result.session_id,
             )
+            if resumed.infrastructure_error is not None:
+                raise RuntimeError(resumed.infrastructure_error)
             result.executor_usage = result.executor_usage + resumed.usage
             result.session_id = resumed.session_id or result.session_id
             result.iterations.append(

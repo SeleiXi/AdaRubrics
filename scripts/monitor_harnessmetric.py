@@ -69,6 +69,9 @@ def _frame(path: Path) -> list[str]:
             )
         )
         lines.append(f"  current={state.get('current_task') or 'none'}")
+        if state.get("status_detail"):
+            retry = f"; retry={state['retry_at']}" if state.get("retry_at") else ""
+            lines.append(f"  detail={state['status_detail']}{retry}")
         lines.append("")
     comparisons = data.get("comparisons", {})
     mismatches = 0
