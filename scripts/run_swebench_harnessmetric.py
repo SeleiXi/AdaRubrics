@@ -7,6 +7,7 @@ import hashlib
 import json
 import shutil
 import stat
+import subprocess
 import sys
 import time
 import traceback
@@ -51,6 +52,65 @@ ARM_DIRECTORIES = {
     "harnessmetric_hy3": "mh",
 }
 QUOTA_ERROR = "codebuddy_quota_exhausted"
+# A stopped Docker Desktop makes every task fail at `docker pull`. Without this
+# guard the queue burns all 100 tasks into infrastructure failures within minutes.
+DOCKER_DOWN_MARKERS = (
+    "failed to connect to the docker api",
+    "the docker daemon is not running",
+    "cannot connect to the docker daemon",
+    "docker desktop is starting",
+    "system cannot find the file specified",
+    "pipe/dockerdesktoplinuxengine",
+)
+
+
+def _docker_daemon_down(error: object) -> bool:
+    text = str(error).casefold()
+    return any(marker in text for marker in DOCKER_DOWN_MARKERS)
+
+
+def _docker_daemon_ready() -> bool:
+    try:
+        completed = subprocess.run(  # noqa: S603
+            ["docker", "info", "--format", "{{.ServerVersion}}"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0 and bool(completed.stdout.strip())
+
+
+def _image_available(image: str, cwd: Path) -> bool:
+    """Return True when the image is already present locally, so the
+    unconditional `docker pull` (which still contacts the registry to verify
+    the manifest) can be skipped when Docker Hub is unreachable."""
+    try:
+        completed = subprocess.run(  # noqa: S603
+            ["docker", "image", "inspect", image],  # noqa: S607
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+            cwd=cwd,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
+
+
+
+def _await_docker_daemon(*, retry_seconds: float, max_wait_hours: float) -> bool:
+    """Block until the Docker daemon answers, so tasks are not consumed while it is down."""
+
+    started = time.monotonic()
+    while not _docker_daemon_ready():
+        if (time.monotonic() - started) / 3600 >= max_wait_hours:
+            return False
+        time.sleep(retry_seconds)
+    return True
 
 
 def _best_effort_remove(path: Path, attempts: int = 5) -> str | None:
@@ -222,7 +282,8 @@ def run_instance(
 
     started = time.perf_counter()
     image = image_name(instance["instance_id"])
-    docker("pull", image, cwd=root, timeout=7200)
+    if not _image_available(image, root):
+        docker("pull", image, cwd=root, timeout=7200)
     pristine = prepare_pristine(instance, root, image)
     workspace = prepare_workspace(
         pristine=pristine,
@@ -346,6 +407,8 @@ def main() -> None:
     parser.add_argument("--infrastructure-retries", type=int, default=3)
     parser.add_argument("--quota-retry-seconds", type=int, default=300)
     parser.add_argument("--quota-max-wait-hours", type=float, default=168.0)
+    parser.add_argument("--docker-retry-seconds", type=int, default=60)
+    parser.add_argument("--docker-max-wait-hours", type=float, default=168.0)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--instance-id", action="append")
     parser.add_argument("--keep-workspaces", action="store_true")
@@ -377,6 +440,22 @@ def main() -> None:
     failures_path = args.run_root / ARM_DIRECTORIES[arm] / "infrastructure_failures.json"
     failures_path.parent.mkdir(parents=True, exist_ok=True)
     failures: list[dict[str, Any]] = []
+    if not _docker_daemon_ready():
+        ledger.mark_arm(
+            arm,
+            status="waiting_docker",
+            status_detail="docker daemon unreachable",
+        )
+        if not _await_docker_daemon(
+            retry_seconds=args.docker_retry_seconds,
+            max_wait_hours=args.docker_max_wait_hours,
+        ):
+            ledger.mark_arm(arm, status="finished", current_task=None)
+            raise SystemExit(
+                f"docker daemon unreachable after {args.docker_max_wait_hours:g}h; "
+                "start Docker Desktop and rerun this arm"
+            )
+        ledger.mark_arm(arm, status="running")
     try:
         for instance in instances:
             ledger.mark_arm(arm, status="running", current_task=instance["instance_id"])
@@ -407,9 +486,29 @@ def main() -> None:
                         )
                     if last_error is not None and QUOTA_ERROR in str(last_error):
                         break
+                    if last_error is not None and _docker_daemon_down(last_error):
+                        break
                     if attempt < args.infrastructure_retries:
                         time.sleep(min(60, 5 * attempt))
                 if last_error is None:
+                    break
+                # A stopped daemon is an environment outage, not a task failure. Hold the
+                # queue on this instance until Docker answers again.
+                if _docker_daemon_down(last_error):
+                    ledger.mark_arm(
+                        arm,
+                        status="waiting_docker",
+                        current_task=instance["instance_id"],
+                        status_detail="docker daemon unreachable",
+                    )
+                    if _await_docker_daemon(
+                        retry_seconds=args.docker_retry_seconds,
+                        max_wait_hours=args.docker_max_wait_hours,
+                    ):
+                        ledger.mark_arm(
+                            arm, status="running", current_task=instance["instance_id"]
+                        )
+                        continue
                     break
                 if QUOTA_ERROR not in str(last_error):
                     break

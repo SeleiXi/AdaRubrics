@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -35,6 +37,29 @@ def _format_tokens(value: int) -> str:
     return str(value)
 
 
+def _pid_alive(pid: Any) -> bool:
+    try:
+        process_id = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if process_id <= 0:
+        return False
+    if os.name == "nt":
+        process_query_limited_information = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            process_query_limited_information, False, process_id
+        )
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    try:
+        os.kill(process_id, 0)
+    except OSError:
+        return False
+    return True
+
+
 def _frame(path: Path) -> list[str]:
     data = _read(path)
     arms = data.get("arms", {})
@@ -50,11 +75,25 @@ def _frame(path: Path) -> list[str]:
         f"Ledger: {path}",
         "",
     ]
+    dead_running: list[str] = []
     for name in ARM_NAMES:
         state = arms.get(name, {})
         total = int(state.get("total", data.get("task_count", 100)))
         done = int(state.get("completed", 0))
-        lines.append(f"{labels[name]}  [{state.get('status', 'pending')}]")
+        status = str(state.get("status", "pending"))
+        pid = state.get("pid")
+        pid_file = path.parent / f"{name}.pid"
+        file_pid: int | None = None
+        if pid_file.is_file():
+            try:
+                file_pid = int(pid_file.read_text(encoding="utf-8").strip())
+            except ValueError:
+                file_pid = None
+        alive = _pid_alive(pid) or _pid_alive(file_pid)
+        if status in {"running", "waiting_quota"} and not alive:
+            dead_running.append(name)
+            status = f"{status}/DEAD"
+        lines.append(f"{labels[name]}  [{status}]")
         lines.append(
             f"  {_bar(done, total)}  success={state.get('resolved', 0)}/{done} "
             f"censored={state.get('censored', 0)} infra={state.get('failed_infrastructure', 0)}"
@@ -68,7 +107,7 @@ def _frame(path: Path) -> list[str]:
                 state.get("turns", 0),
             )
         )
-        lines.append(f"  current={state.get('current_task') or 'none'}")
+        lines.append(f"  current={state.get('current_task') or 'none'}  pid={pid}")
         if state.get("status_detail"):
             retry = f"; retry={state['retry_at']}" if state.get("retry_at") else ""
             lines.append(f"  detail={state['status_detail']}{retry}")
@@ -84,9 +123,17 @@ def _frame(path: Path) -> list[str]:
         [
             f"Recorded paired success mismatches: {mismatches}",
             f"Recorded large wall-time differences: {time_outliers}",
-            "The screen refreshes every 5 minutes. Ctrl+C stops only this monitor.",
         ]
     )
+    if dead_running:
+        lines.extend(
+            [
+                "",
+                f"ALERT: ledger says running but process is dead: {', '.join(dead_running)}",
+                "Resume with launch_swebench_100.ps1 (it never kills). Do NOT taskkill runner PIDs.",
+            ]
+        )
+    lines.append("The screen refreshes every 5 minutes. Ctrl+C stops only this monitor.")
     return lines
 
 

@@ -33,7 +33,12 @@ def _infrastructure_error(stderr: str) -> str | None:
 
 
 def _launcher() -> list[str]:
-    executable = shutil.which("codebuddy.cmd") or shutil.which("codebuddy.exe")
+    # Windows ships codebuddy.cmd/exe; Linux/macOS expose a plain `codebuddy`.
+    executable = (
+        shutil.which("codebuddy.cmd")
+        or shutil.which("codebuddy.exe")
+        or shutil.which("codebuddy")
+    )
     if executable is None:
         raise RuntimeError("CodeBuddy CLI was not found on PATH")
     if Path(executable).suffix.casefold() != ".cmd":

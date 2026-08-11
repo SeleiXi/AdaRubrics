@@ -83,7 +83,16 @@ class RunLedger:
         temporary.write_text(
             json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
         )
-        os.replace(temporary, self.path)
+        # Windows: another worker may transiently hold the destination file lock
+        # (e.g. os.replace target in use by a parallel process). Retry briefly.
+        for attempt in range(30):
+            try:
+                os.replace(temporary, self.path)
+                return
+            except PermissionError:
+                if attempt == 29:
+                    raise
+                time.sleep(0.5)
 
     def initialize(
         self,

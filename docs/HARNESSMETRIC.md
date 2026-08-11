@@ -49,3 +49,15 @@ It also opens a separate terminal that refreshes every five minutes. The shared
 success, end-to-end wall time, phase-level token usage, mismatched-success failure
 analysis, and large runtime-difference explanations. Each arm is resumable by rerunning
 the launcher.
+
+### Resume rules (do not kill runners)
+
+- Rerun `scripts\launch_swebench_100.ps1` to resume. It never kills processes; it only
+  starts arms whose pid file is missing or points at a dead/stale process.
+- Resume a subset with
+  `powershell -ExecutionPolicy Bypass -File scripts\launch_swebench_100.ps1 -Only harnessmetric_deepseek_v4_flash,harnessmetric_hy3`.
+- Do **not** `taskkill /T /F` the arm runner PID. That aborts mid-loop checkpoints and
+  leaves `experiment.json` stuck at `status=running` even though nothing is alive.
+  Agent wall-time limits already isolate-kill only the CodeBuddy child process.
+- The monitor flags `running/DEAD` when the ledger claims an arm is active but its
+  process is gone; use the launcher to resume instead of killing anything.

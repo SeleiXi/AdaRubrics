@@ -15,10 +15,13 @@ def _write_text_with_linux_newlines(
     errors: str | None = None,
     newline: str | None = None,
 ) -> int:
+    # Default to UTF-8 on Windows so eval artifacts containing non-ASCII
+    # characters (e.g. SWE-bench test_patch with Unicode payloads) are not
+    # mangled by the cp1252 default encoding.
     return _write_text(
         self,
         data,
-        encoding=encoding,
+        encoding=encoding if encoding is not None else "utf-8",
         errors=errors,
         newline="\n" if newline is None else newline,
     )
