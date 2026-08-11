@@ -235,6 +235,7 @@ def _harnessmetric(
         model=model,
         effort=effort,
         initial_metric_policy=args.initial_metric_policy,
+        verifier_enabled=args.verifier_enabled,
         agent_timeout_seconds=args.agent_timeout,
         generator_timeout_seconds=args.generator_timeout,
         verifier_timeout_seconds=args.verifier_timeout,
@@ -398,6 +399,10 @@ def main() -> None:
     parser.add_argument("--model", choices=("deepseek-v4-flash", "hy3"), required=True)
     parser.add_argument("--effort", default="medium")
     parser.add_argument("--initial-metric-policy", choices=("off", "hard", "all"), default="off")
+    parser.add_argument("--no-verifier", action="store_false", dest="verifier_enabled",
+                        default=True,
+                        help="Disable the verifier measurement/refine loop (prompt-engineering "
+                             "ablation): generated metrics only guide the executor prompt.")
     parser.add_argument("--agent-timeout", type=int, default=7200)
     parser.add_argument("--generator-timeout", type=int, default=7200)
     parser.add_argument("--verifier-timeout", type=int, default=7200)

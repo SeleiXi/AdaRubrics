@@ -62,6 +62,7 @@ class HarnessMetricLoop:
         model: str,
         effort: str = "medium",
         initial_metric_policy: str = "off",
+        verifier_enabled: bool = True,
         agent_timeout_seconds: int = 7200,
         generator_timeout_seconds: int = 7200,
         verifier_timeout_seconds: int = 7200,
@@ -78,6 +79,7 @@ class HarnessMetricLoop:
         self.model = model
         self.effort = effort
         self.initial_metric_policy = initial_metric_policy
+        self.verifier_enabled = verifier_enabled
         self.agent_timeout_seconds = agent_timeout_seconds
         self.generator_timeout_seconds = generator_timeout_seconds
         self.verifier_timeout_seconds = verifier_timeout_seconds
@@ -371,8 +373,19 @@ Return one raw JSON object matching this schema:\n{json.dumps(schema, ensure_asc
         loop_started = time.perf_counter()
 
         if not any(item.phase == "initial_execution" for item in result.iterations):
+            # In prompt-engineering mode (verifier disabled) the generated
+            # metrics must reach the executor even when the default policy is
+            # "off" -- the metrics ARE the whole intervention.
+            if not self.verifier_enabled:
+                initial_prompt = (
+                    self.original_prompt
+                    + "\n\n"
+                    + rubric.to_executor_prompt(include_exploratory=True)
+                )
+            else:
+                initial_prompt = self._initial_prompt(rubric)
             initial = self._agent_call(
-                prompt=self._initial_prompt(rubric),
+                prompt=initial_prompt,
                 phase="initial",
                 index=0,
                 resume_session_id=None,
@@ -399,6 +412,14 @@ Return one raw JSON object matching this schema:\n{json.dumps(schema, ensure_asc
                 _atomic_model_write(self.state_path, result)
                 raise RuntimeError(f"initial executor exited {initial.return_code}")
             _atomic_model_write(self.state_path, result)
+
+        if not self.verifier_enabled:
+            # Ablation: metrics guide the executor's prompt only; no verifier
+            # measurement/refine loop. Stop after the single implementation pass.
+            result.stopped = True
+            result.stop_reason = "prompt_engineering_only"
+            _atomic_model_write(self.state_path, result)
+            return result
 
         measurement_count = sum(item.phase == "measurement" for item in result.iterations)
         last = result.iterations[-1]
