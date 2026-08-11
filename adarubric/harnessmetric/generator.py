@@ -24,6 +24,18 @@ Every measurement must be repeatable with visible files or public tests. Hidden 
 gold patches, benchmark metadata, and external repositories are unavailable. Include a
 scope guard and an anti-gaming check for every metric. The original issue always has
 priority over generated metrics. Prefer 3-5 non-redundant metrics.
+
+VERIFIER DECISION (verifier_plan field): Decide whether verification is worth keeping
+for this task and whether it should be deterministic:
+- keep_verifier=false only when this task genuinely cannot be verified during the loop
+  (e.g. the correct result is unknowable without hidden tests). Otherwise keep it true.
+- rule_based=true when the task has an objective, checkable outcome: a numeric result,
+  a fixed output format, a crash/error disappearing, an exact log line, a deterministic
+  test suite, a known-good output file. Specify rule (plain language) and command (a
+  concrete shell command using only visible files/public tests). When rule_based is
+  true the deterministic rule replaces an open-ended LLM judge.
+- rule_based=false when the outcome is inherently subjective or under-specified and
+  only a human-style judgment can decide (rare for coding tasks).
 """
 
 

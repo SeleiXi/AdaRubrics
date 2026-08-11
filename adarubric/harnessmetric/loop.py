@@ -239,6 +239,42 @@ class HarnessMetricLoop:
 
     def _measure(self, rubric: OperationalRubric, index: int) -> tuple[MeasurementBatch, Usage]:
         verify_workspace = self._verification_workspace(index)
+        plan = rubric.verifier_plan
+        if plan is not None and plan.rule_based and plan.command.strip():
+            # Ablation (rules-verifier): a deterministic rule replaces the
+            # open-ended LLM judge. Run the concrete command in the isolated
+            # checkout and map its exit code / output onto the metrics.
+            completed = _run(plan.command, verify_workspace)
+            status = MetricStatus.SATISFIED if completed.returncode == 0 else MetricStatus.UNSATISFIED
+            evidence = [
+                f"rule verifier command: {plan.command}",
+                f"exit code: {completed.returncode}",
+                (completed.stdout or completed.stderr).strip()[:2000],
+            ]
+            measurements = [
+                MetricMeasurement(
+                    name=metric.name,
+                    status=status,
+                    observed_value=plan.rule,
+                    evidence=evidence,
+                    confidence=1.0 if completed.returncode == 0 else 0.6,
+                )
+                for metric in rubric.metrics
+            ]
+            batch = MeasurementBatch(
+                task_id=self.task.task_id,
+                measurements=measurements,
+                project_test_status=f"rule verifier exit {completed.returncode}",
+                recommended_stop=completed.returncode == 0,
+                stop_reason=(
+                    "all rule-verifier checks passed"
+                    if completed.returncode == 0
+                    else "rule-verifier check failed"
+                ),
+            )
+            path = self.artifact_root / "verifier" / f"{index:02d}" / "measurement.json"
+            path.write_text(batch.model_dump_json(indent=2) + "\n", encoding="utf-8")
+            return batch, Usage()
         schema = MeasurementBatch.model_json_schema()
         prompt = f"""You are the isolated HarnessMetric verifier. Do not implement or
 edit the solution. Inspect the current repository state and run only relevant public
@@ -399,6 +435,17 @@ Return one raw JSON object matching this schema:\n{json.dumps(schema, ensure_asc
                 _atomic_model_write(self.state_path, result)
                 raise RuntimeError(f"initial executor exited {initial.return_code}")
             _atomic_model_write(self.state_path, result)
+
+        if (
+            rubric.verifier_plan is not None
+            and not rubric.verifier_plan.keep_verifier
+        ):
+            # Ablation (rules-verifier): the generator decided this task cannot
+            # be verified in-loop; skip the measurement/refine loop.
+            result.stopped = True
+            result.stop_reason = "verifier_declined_by_generator"
+            _atomic_model_write(self.state_path, result)
+            return result
 
         measurement_count = sum(item.phase == "measurement" for item in result.iterations)
         last = result.iterations[-1]

@@ -54,6 +54,36 @@ class OperationalMetric(BaseModel):
         return value
 
 
+class VerifierPlan(BaseModel):
+    """Ablation: deterministic, rule-based verifier decided by the generator LLM.
+
+    ``keep_verifier`` lets the agent choose whether a verifier is worth keeping for
+    this task at all (None keeps the default loop behavior). ``rule``/``command``
+    describe the concrete deterministic check when the task is verifiable by rules.
+    """
+
+    keep_verifier: bool = Field(
+        default=True,
+        description="Whether a verifier should be kept for this task. False means no "
+                    "verifier at all (agent decides to skip verification).",
+    )
+    rule_based: bool = Field(
+        default=False,
+        description="True when the task admits a deterministic rule-based verifier "
+                    "instead of an open-ended LLM judge.",
+    )
+    rule: str = Field(
+        default="",
+        description="Plain-language specification of the deterministic rule: exact "
+                    "inputs, expected outputs, tolerances, and the pass/fail predicate.",
+    )
+    command: str = Field(
+        default="",
+        description="Concrete shell command (if any) that evaluates the rule, using "
+                    "only visible repository files and public tests.",
+    )
+
+
 class OperationalRubric(BaseModel):
     """AdaRubric-style adaptive dimensions with operational measurement semantics."""
 
@@ -62,6 +92,15 @@ class OperationalRubric(BaseModel):
     metrics: list[OperationalMetric] = Field(min_length=3, max_length=7)
     stop_condition: str = Field(min_length=12)
     generation_rationale: str = Field(min_length=12)
+    verifier_plan: VerifierPlan | None = Field(
+        default=None,
+        description=(
+            "Ablation (rules-verifier): whether the task admits a deterministic "
+            "rule-based verifier, and if so the concrete rule. When set with "
+            "keep_verifier=True the executor is held to this deterministic check "
+            "instead of an open-ended LLM judge."
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_graph(self) -> OperationalRubric:
