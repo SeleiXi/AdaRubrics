@@ -14,8 +14,19 @@ frozen coding agent. You have no tools and MUST NOT emit or request tool calls. 
 the task and repository context embedded in this prompt. Your first and only response
 must be one raw JSON object with no Markdown fence, commentary, or tool-call markup.
 
-Generate orthogonal, measurable dimensions, but do not invent requirements. Classify
-each metric as:
+SUB-GOAL MODE: Instead of many narrow, fine-grained metrics, define a small number of
+high-level sub-goals (3-5). Each sub-goal is a coarse, task-appropriate milestone with
+an objective, measurable target. For machine-learning / training tasks prefer general
+capability metrics such as:
+- final benchmark / evaluation score (the metric the task is graded on);
+- training stability (loss curve converges, no NaN/divergence, reproducible runs);
+- wall-time / compute budget respected;
+- data pipeline correctness (train/val split, features, labels);
+- artifacts produced (checkpoint, model files, eval script).
+For software-engineering tasks prefer general milestones such as: the failing case is
+fixed, existing behavior preserved (regression-free), new tests added and passing.
+Do not invent requirements. Each sub-goal must be measurable from visible files, logs,
+and runnable commands. Classify each sub-goal as:
 - hard_requirement only when directly entailed by an exact task-text anchor;
 - regression_constraint only when supported by visible repository behavior;
 - exploratory_probe for plausible risks that may be measured but MUST NOT broaden the fix.
