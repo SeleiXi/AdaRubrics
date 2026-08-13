@@ -40,6 +40,17 @@ def _launcher() -> list[str]:
         or shutil.which("codebuddy")
     )
     if executable is None:
+        # Fallback to known npm-global install locations when the worker's PATH
+        # is stale (e.g. codebuddy reinstalled while a long-lived worker runs).
+        import os
+        candidates = [
+            Path(os.path.expanduser("~")) / "AppData" / "Roaming" / "npm" / "codebuddy.cmd",
+            Path(os.path.expanduser("~")) / "AppData" / "Roaming" / "npm" / "codebuddy.exe",
+            Path("/usr/local/bin/codebuddy"),
+            Path("/usr/bin/codebuddy"),
+        ]
+        executable = next((str(c) for c in candidates if c.is_file()), None)
+    if executable is None:
         raise RuntimeError("CodeBuddy CLI was not found on PATH")
     if Path(executable).suffix.casefold() != ".cmd":
         return [executable]
