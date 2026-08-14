@@ -306,7 +306,34 @@ Return one raw JSON object matching this schema:\n{json.dumps(schema, ensure_asc
                 return batch, total
             except (ValueError, json.JSONDecodeError) as exc:
                 last_error = exc
-        raise RuntimeError(f"verifier returned no valid measurement: {last_error}")
+        # Verifier could not produce a valid measurement after all attempts.
+        # Do NOT surface as an infrastructure failure: the executor's patch may
+        # still be valid, and the official grader will judge it. Mark all
+        # metrics unsatisfied with a transparent stop reason so the loop keeps
+        # refining (or budget-censors) instead of aborting the whole trial.
+        failed_batch = MeasurementBatch(
+            task_id=self.task.task_id,
+            measurements=[
+                MetricMeasurement(
+                    name=metric.name,
+                    status=MetricStatus.UNSATISFIED,
+                    observed_value=None,
+                    evidence=[
+                        "verifier could not produce a valid measurement after "
+                        f"{max(1, attempt)} attempts: {last_error}",
+                        "official grader will still judge the executor patch",
+                    ],
+                    confidence=0.0,
+                )
+                for metric in rubric.metrics
+            ],
+            project_test_status="verifier unavailable",
+            recommended_stop=False,
+            stop_reason="verifier unavailable",
+        )
+        path = self.artifact_root / "verifier" / f"{index:02d}" / "measurement.json"
+        path.write_text(failed_batch.model_dump_json(indent=2) + "\n", encoding="utf-8")
+        return failed_batch, total
 
     @staticmethod
     def _can_stop(batch: MeasurementBatch, rubric: OperationalRubric) -> bool:
