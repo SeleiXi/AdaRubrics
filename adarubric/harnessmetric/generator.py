@@ -14,19 +14,42 @@ frozen coding agent. You have no tools and MUST NOT emit or request tool calls. 
 the task and repository context embedded in this prompt. Your first and only response
 must be one raw JSON object with no Markdown fence, commentary, or tool-call markup.
 
-SUB-GOAL MODE: Instead of many narrow, fine-grained metrics, define a small number of
-high-level sub-goals (3-5). Each sub-goal is a coarse, task-appropriate milestone with
-an objective, measurable target. For machine-learning / training tasks prefer general
-capability metrics such as:
-- final benchmark / evaluation score (the metric the task is graded on);
-- training stability (loss curve converges, no NaN/divergence, reproducible runs);
-- wall-time / compute budget respected;
-- data pipeline correctness (train/val split, features, labels);
-- artifacts produced (checkpoint, model files, eval script).
-For software-engineering tasks prefer general milestones such as: the failing case is
-fixed, existing behavior preserved (regression-free), new tests added and passing.
-Do not invent requirements. Each sub-goal must be measurable from visible files, logs,
-and runnable commands. Classify each sub-goal as:
+SUB-GOAL MODE (STRICT): Each metric MUST be a coarse, capability-level sub-goal, NOT a
+fine-grained behavioral assertion. This is the single most important requirement.
+
+CORRECT (capability-level sub-goals, use these shapes):
+- ML/training tasks:
+  * "Final benchmark / evaluation score": the metric the task is graded on reaches the
+    specified bar (e.g. test accuracy, RMSE, F1).
+  * "Training stability": the loss curve converges, no NaN/divergence, training is
+    reproducible across runs.
+  * "Data pipeline correctness": train/val split, features, labels are handled
+    correctly.
+  * "Artifacts produced": checkpoint/model files + eval script exist and load.
+  * "Compute budget respected": fits in the allowed wall-time / memory.
+- SWE tasks:
+  * "Issue is fixed": the original failure scenario from the task text no longer
+    fails.
+  * "No regression": existing test suite / visible behavior keeps passing.
+  * "Tests added": the fix ships with a test covering the reported failure.
+
+FORBIDDEN (fine-grained, MUST NOT appear in any metric):
+- Naming specific functions, classes, files, line numbers, or internal APIs in the
+  metric name/description/target.
+- Asserting specific implementation behavior (e.g. "UPDATE must use child PK in
+  WHERE", "get_child_arguments returns ['-m','pkg']").
+- Encoding the mechanism of the fix as a requirement. State WHAT outcome is desired,
+  never HOW it should be achieved.
+
+The only exception: you MAY quote a task-text anchor (source_anchor) that references
+concrete code, but the metric itself must be phrased at capability level.
+
+Each sub-goal needs a measurable target using only visible files, logs, and runnable
+commands (e.g. "eval script runs and reports accuracy >= baseline", "loss log shows
+convergence and no NaN", "reproduction script from the issue exits 0"). Keep the target
+at the outcome level too.
+
+Classify each sub-goal as:
 - hard_requirement only when directly entailed by an exact task-text anchor;
 - regression_constraint only when supported by visible repository behavior;
 - exploratory_probe for plausible risks that may be measured but MUST NOT broaden the fix.
