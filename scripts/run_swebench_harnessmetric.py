@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from adarubric.core.models import TaskDescription
-from adarubric.harnessmetric.codebuddy import run_codebuddy
+from adarubric.harnessmetric.codebuddy import run_agent
 from adarubric.harnessmetric.ledger import RunLedger
 from adarubric.harnessmetric.loop import HarnessMetricLoop
 from adarubric.harnessmetric.models import Usage
@@ -173,11 +173,13 @@ def _plain(
     model: str,
     effort: str,
     timeout: int,
+    runner: str = "codebuddy",
 ) -> tuple[dict[str, Any], bool]:
     digest = hashlib.sha256(
         f"plain:{instance['instance_id']}:{model}:{root.resolve()}".encode()
     ).hexdigest()[:16]
-    result = run_codebuddy(
+    result = run_agent(
+        runner,
         workspace=workspace,
         prompt=prompt,
         event_log=root / "executor" / "events.json",
@@ -235,6 +237,7 @@ def _harnessmetric(
         model=model,
         effort=effort,
         initial_metric_policy=args.initial_metric_policy,
+        runner=args.runner,
         agent_timeout_seconds=args.agent_timeout,
         generator_timeout_seconds=args.generator_timeout,
         verifier_timeout_seconds=args.verifier_timeout,
@@ -308,6 +311,7 @@ def run_instance(
             model=args.model,
             effort=args.effort,
             timeout=args.agent_timeout,
+            runner=args.runner,
         )
         total_usage = Usage.model_validate(payload["phase_usage"]["executor"])
     else:
@@ -395,7 +399,11 @@ def main() -> None:
     parser.add_argument("--ledger", type=Path, required=True)
     parser.add_argument("--harness-python", type=Path, required=True)
     parser.add_argument("--treatment", choices=("plain", "harnessmetric"), required=True)
-    parser.add_argument("--model", choices=("deepseek-v4-flash", "hy3"), required=True)
+    parser.add_argument("--model", choices=("deepseek-v4-flash", "hy3", "opencode/deepseek-v4-flash-free", "opencode/hy3-free"), required=True)
+    parser.add_argument("--effort", default="medium")
+    parser.add_argument("--runner", choices=("codebuddy", "opencode"), default="codebuddy",
+                        help="Agent CLI runner. codebuddy uses the CodeBuddy CLI; "
+                             "opencode uses the opencode CLI (free models).")
     parser.add_argument("--effort", default="medium")
     parser.add_argument("--initial-metric-policy", choices=("off", "hard", "all"), default="off")
     parser.add_argument("--agent-timeout", type=int, default=7200)
