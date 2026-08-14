@@ -404,7 +404,6 @@ def main() -> None:
     parser.add_argument("--runner", choices=("codebuddy", "opencode"), default="codebuddy",
                         help="Agent CLI runner. codebuddy uses the CodeBuddy CLI; "
                              "opencode uses the opencode CLI (free models).")
-    parser.add_argument("--effort", default="medium")
     parser.add_argument("--initial-metric-policy", choices=("off", "hard", "all"), default="off")
     parser.add_argument("--agent-timeout", type=int, default=7200)
     parser.add_argument("--generator-timeout", type=int, default=7200)
