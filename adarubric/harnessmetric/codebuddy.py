@@ -227,3 +227,125 @@ def run_codebuddy(
         termination_reason=termination_reason,
         infrastructure_error=_infrastructure_error(stderr),
     )
+
+
+def run_opencode(
+    *,
+    workspace: Path,
+    prompt: str,
+    event_log: Path,
+    stderr_log: Path,
+    model: str = "opencode/deepseek-v4-flash-free",
+    effort: str = "medium",
+    timeout_seconds: int = 7200,
+    tools: str = "default",
+    session_id: str | None = None,
+    resume_session_id: str | None = None,
+    persist_session: bool = True,
+    max_turns: int | None = None,
+) -> CodeBuddyResult:
+    """Run one agent invocation through the opencode CLI (free models).
+
+    Mirrors run_codebuddy's interface so the benchmark runner can switch agents
+    with a single flag. opencode emits one JSON object per line in --format json.
+    """
+    opencode = shutil.which("opencode")
+    if opencode is None:
+        raise RuntimeError("opencode CLI was not found on PATH")
+    command = [
+        opencode,
+        "run",
+        "-m",
+        model,
+        "--dir",
+        str(workspace),
+        "--format",
+        "json",
+    ]
+    if resume_session_id:
+        command.extend(["-s", resume_session_id])
+    elif session_id:
+        command.extend(["--title", f"hm-{session_id[-16:] if session_id else 'run'}"])
+    command.append(prompt)
+
+    event_log.parent.mkdir(parents=True, exist_ok=True)
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    started = time.perf_counter()
+    process = subprocess.Popen(  # noqa: S603
+        command,
+        cwd=workspace,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=creationflags,
+    )
+    termination_reason: str | None = None
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        termination_reason = "agent_timeout"
+        if os.name == "nt":
+            taskkill = shutil.which("taskkill.exe") or shutil.which("taskkill")
+            if taskkill is None:
+                raise RuntimeError("taskkill was not found while stopping opencode") from None
+            subprocess.run(  # noqa: S603
+                [taskkill, "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                check=False,
+            )
+        else:
+            process.kill()
+        stdout, stderr = process.communicate()
+        stderr += f"\nAgent wall-time safety limit ({timeout_seconds}s) exceeded\n"
+
+    wall_seconds = time.perf_counter() - started
+    event_log.write_text(stdout, encoding="utf-8")
+    stderr_log.write_text(stderr, encoding="utf-8")
+
+    # Parse opencode JSONL events.
+    events: list[dict[str, Any]] = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+
+    final = ""
+    detected_session: str | None = None
+    usage = Usage()
+    for ev in events:
+        if ev.get("sessionID"):
+            detected_session = ev["sessionID"]
+        if ev.get("type") == "text" and isinstance(ev.get("part"), dict):
+            text = ev["part"].get("text")
+            if isinstance(text, str) and text.strip():
+                final = text
+        if ev.get("type") == "step_finish" and isinstance(ev.get("part"), dict):
+            toks = (ev["part"].get("tokens") or {})
+            usage.input_tokens += int(toks.get("input", 0) or 0)
+            usage.output_tokens += int(toks.get("output", 0) or 0)
+            usage.cache_read_input_tokens += int(toks.get("cache", {}).get("read", 0) or 0)
+            usage.cache_creation_input_tokens += int(toks.get("cache", {}).get("write", 0) or 0)
+    usage.wall_seconds = wall_seconds
+
+    return CodeBuddyResult(
+        return_code=process.returncode if process.returncode is not None else 124,
+        usage=usage,
+        session_id=detected_session or resume_session_id or session_id,
+        model=model,
+        final_message=final,
+        termination_reason=termination_reason,
+        infrastructure_error=_infrastructure_error(stderr),
+    )
+
+
+def run_agent(runner: str, **kwargs: Any) -> CodeBuddyResult:
+    """Dispatch a single agent invocation to codebuddy or opencode."""
+    if runner == "opencode":
+        return run_opencode(**kwargs)
+    return run_codebuddy(**kwargs)

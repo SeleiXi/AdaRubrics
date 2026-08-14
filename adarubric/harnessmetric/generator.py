@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from adarubric.core.models import TaskDescription
-from adarubric.harnessmetric.codebuddy import extract_json_object, run_codebuddy
+from adarubric.harnessmetric.codebuddy import extract_json_object, run_agent
 from adarubric.harnessmetric.models import OperationalRubric, Usage
 
 SYSTEM_PROMPT = """You compile task-adaptive rubrics into operational metrics for a
@@ -48,6 +48,7 @@ def generate_operational_rubric(
     effort: str = "medium",
     timeout_seconds: int = 1800,
     max_attempts: int = 3,
+    runner: str = "codebuddy",
 ) -> tuple[OperationalRubric, Usage]:
     """Generate and locally validate a rubric without granting generator tools."""
 
@@ -69,7 +70,8 @@ def generate_operational_rubric(
                 "\n\nThe previous response failed schema validation. Return a complete "
                 f"replacement. Validation error: {str(last_error)[:2000]}"
             )
-        result = run_codebuddy(
+        result = run_agent(
+            runner,
             workspace=workspace,
             prompt=prompt,
             event_log=artifact_root / f"events_attempt_{attempt}.json",

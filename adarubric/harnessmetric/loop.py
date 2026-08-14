@@ -13,7 +13,7 @@ from adarubric.core.models import TaskDescription
 from adarubric.harnessmetric.codebuddy import (
     CodeBuddyResult,
     extract_json_object,
-    run_codebuddy,
+    run_agent,
 )
 from adarubric.harnessmetric.generator import generate_operational_rubric
 from adarubric.harnessmetric.models import (
@@ -62,6 +62,7 @@ class HarnessMetricLoop:
         model: str,
         effort: str = "medium",
         initial_metric_policy: str = "off",
+        runner: str = "codebuddy",
         agent_timeout_seconds: int = 7200,
         generator_timeout_seconds: int = 7200,
         verifier_timeout_seconds: int = 7200,
@@ -77,6 +78,7 @@ class HarnessMetricLoop:
         self.repository_context = repository_context
         self.model = model
         self.effort = effort
+        self.runner = runner
         self.initial_metric_policy = initial_metric_policy
         self.agent_timeout_seconds = agent_timeout_seconds
         self.generator_timeout_seconds = generator_timeout_seconds
@@ -109,6 +111,7 @@ class HarnessMetricLoop:
             model=self.model,
             effort=self.effort,
             timeout_seconds=self.generator_timeout_seconds,
+            runner=self.runner,
         )
 
     def _initial_prompt(self, rubric: OperationalRubric) -> str:
@@ -129,7 +132,8 @@ class HarnessMetricLoop:
         resume_session_id: str | None,
     ) -> CodeBuddyResult:
         root = self.artifact_root / "executor" / f"{index:02d}_{phase}"
-        return run_codebuddy(
+        return run_agent(
+            self.runner,
             workspace=self.workspace,
             prompt=prompt,
             event_log=root / "events.json",
@@ -264,7 +268,8 @@ Return one raw JSON object matching this schema:\n{json.dumps(schema, ensure_asc
                     "\nYour prior result was invalid. Return a complete replacement: "
                     + str(last_error)[:1500]
                 )
-            result = run_codebuddy(
+            result = run_agent(
+                self.runner,
                 workspace=verify_workspace,
                 prompt=attempt_prompt,
                 event_log=(
