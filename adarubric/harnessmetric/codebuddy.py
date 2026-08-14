@@ -27,7 +27,13 @@ class CodeBuddyResult:
 
 def _infrastructure_error(stderr: str) -> str | None:
     lowered = stderr.casefold()
-    if "429" in lowered and ("额度已用尽" in stderr or "quota" in lowered):
+    if "429" in lowered and (
+        "额度" in stderr  # 额度已用尽 / 超出频率限制 / 频率超限 etc.
+        or "频率" in stderr
+        or "quota" in lowered
+        or "rate" in lowered
+        or "limit" in lowered
+    ):
         return "codebuddy_quota_exhausted"
     return None
 
