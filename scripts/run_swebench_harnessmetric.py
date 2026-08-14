@@ -238,6 +238,7 @@ def _harnessmetric(
         effort=effort,
         initial_metric_policy=args.initial_metric_policy,
         runner=args.runner,
+        verifier_enabled=args.verifier_enabled,
         agent_timeout_seconds=args.agent_timeout,
         generator_timeout_seconds=args.generator_timeout,
         verifier_timeout_seconds=args.verifier_timeout,
@@ -404,6 +405,10 @@ def main() -> None:
     parser.add_argument("--runner", choices=("codebuddy", "opencode"), default="codebuddy",
                         help="Agent CLI runner. codebuddy uses the CodeBuddy CLI; "
                              "opencode uses the opencode CLI (free models).")
+    parser.add_argument("--verifier-enabled", action=argparse.BooleanOptionalAction, default=True,
+                        help="Disable the verifier/refinement loop (prompt-eng ablation): "
+                             "metrics are injected into the executor prompt and the loop "
+                             "ends after a single execution.")
     parser.add_argument("--initial-metric-policy", choices=("off", "hard", "all"), default="off")
     parser.add_argument("--agent-timeout", type=int, default=7200)
     parser.add_argument("--generator-timeout", type=int, default=7200)
