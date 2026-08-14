@@ -277,6 +277,7 @@ class HarnessMetricLoop:
                 ),
             )
             path = self.artifact_root / "verifier" / f"{index:02d}" / "measurement.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(batch.model_dump_json(indent=2) + "\n", encoding="utf-8")
             return batch, Usage()
         schema = MeasurementBatch.model_json_schema()
@@ -338,6 +339,7 @@ Return one raw JSON object matching this schema:\n{json.dumps(schema, ensure_asc
                     extract_json_object(result.final_message), rubric
                 )
                 path = self.artifact_root / "verifier" / f"{index:02d}" / "measurement.json"
+                path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(batch.model_dump_json(indent=2) + "\n", encoding="utf-8")
                 return batch, total
             except (ValueError, json.JSONDecodeError) as exc:
@@ -368,6 +370,7 @@ Return one raw JSON object matching this schema:\n{json.dumps(schema, ensure_asc
             stop_reason="verifier unavailable",
         )
         path = self.artifact_root / "verifier" / f"{index:02d}" / "measurement.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(failed_batch.model_dump_json(indent=2) + "\n", encoding="utf-8")
         return failed_batch, total
 
