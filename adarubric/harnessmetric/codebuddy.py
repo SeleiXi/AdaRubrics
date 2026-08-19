@@ -127,32 +127,49 @@ def run_codebuddy(
     wall-time interruption is recorded as censored instead of a task failure.
     """
 
-    command = [
-        *_launcher(),
-        "--print",
-        "--output-format",
-        "json",
-        "--input-format",
-        "text",
-        "--model",
-        model,
-        "--effort",
-        effort,
-        "--tools",
-        tools,
-        "--setting-sources",
-        "project",
-    ]
-    if tools:
-        command.extend(["--permission-mode", "bypassPermissions"])
-    if resume_session_id:
-        command.extend(["--resume", resume_session_id])
-    elif session_id:
-        command.extend(["--session-id", session_id])
-    if not persist_session:
-        command.append("--no-session-persistence")
-    if max_turns is not None:
-        command.extend(["--max-turns", str(max_turns)])
+    is_opencode = model.startswith("opencode/")
+    if is_opencode:
+        # Route through the opencode CLI (free models like opencode/hy3-free).
+        executable = shutil.which("opencode")
+        if executable is None:
+            raise RuntimeError("opencode CLI not found on PATH")
+        command = [
+            executable,
+            "run",
+            "--model",
+            model,
+            "--pure",
+            "--title",
+            "hm-agent",
+        ]
+    else:
+        command = [
+            *_launcher(),
+            "--print",
+            "--output-format",
+            "json",
+            "--input-format",
+            "text",
+            "--model",
+            model,
+            "--effort",
+            effort,
+            "--tools",
+            tools,
+            "--setting-sources",
+            "project",
+        ]
+    if not is_opencode:
+        if tools:
+            command.extend(["--permission-mode", "bypassPermissions"])
+        if resume_session_id:
+            command.extend(["--resume", resume_session_id])
+        elif session_id:
+            command.extend(["--session-id", session_id])
+        if not persist_session:
+            command.append("--no-session-persistence")
+        if max_turns is not None:
+            command.extend(["--max-turns", str(max_turns)])
 
     event_log.parent.mkdir(parents=True, exist_ok=True)
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
@@ -193,17 +210,29 @@ def run_codebuddy(
 
     result_event: dict[str, Any] = {}
     detected_model: str | None = None
-    try:
-        events = _events(stdout)
-        result_event = next(
-            (event for event in reversed(events) if event.get("type") == "result"), {}
-        )
-        for event in events:
-            provider = event.get("providerData") or {}
-            if provider.get("model"):
-                detected_model = str(provider["model"])
-    except (json.JSONDecodeError, ValueError):
-        pass
+    if is_opencode:
+        # opencode prints a banner ("> build · model") then the raw reply text.
+        reply = stdout
+        banner = reply.find("> build")
+        if banner != -1:
+            reply = reply[banner:]
+            nl = reply.find("\n")
+            if nl != -1:
+                reply = reply[nl + 1 :]
+        result_event = {"result": reply.strip(), "usage": {}}
+        detected_model = model
+    else:
+        try:
+            events = _events(stdout)
+            result_event = next(
+                (event for event in reversed(events) if event.get("type") == "result"), {}
+            )
+            for event in events:
+                provider = event.get("providerData") or {}
+                if provider.get("model"):
+                    detected_model = str(provider["model"])
+        except (json.JSONDecodeError, ValueError):
+            pass
 
     usage_payload = result_event.get("usage") or {}
     final = result_event.get("result", "")
@@ -266,7 +295,9 @@ def run_opencode(
         command.extend(["-s", resume_session_id])
     elif session_id:
         command.extend(["--title", f"hm-{session_id[-16:] if session_id else 'run'}"])
-    command.append(prompt)
+    # Pass the prompt via stdin: Windows limits command-line length (~32K),
+    # and HM prompts (system prompt + schema + task + repo context) exceed it.
+    # opencode run reads a message from stdin when no message argument is given.
 
     event_log.parent.mkdir(parents=True, exist_ok=True)
     creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
@@ -277,13 +308,14 @@ def run_opencode(
         text=True,
         encoding="utf-8",
         errors="replace",
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         creationflags=creationflags,
     )
     termination_reason: str | None = None
     try:
-        stdout, stderr = process.communicate(timeout=timeout_seconds)
+        stdout, stderr = process.communicate(prompt, timeout=timeout_seconds)
     except subprocess.TimeoutExpired:
         termination_reason = "agent_timeout"
         if os.name == "nt":
